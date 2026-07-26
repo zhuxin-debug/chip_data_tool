@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "name": "pairwise_xor_example",
+  "sample_input": "32'h1234_5678",
+  "input_defaults": {
+    "format_hint": "auto",
+    "width": 32,
+    "signed_mode": "自动"
+  },
+  "steps": [
+    {
+      "type": "group_reduce",
+      "operator": "XOR",
+      "group_bits": 2,
+      "direction": "lsb"
+    }
+  ]
+}

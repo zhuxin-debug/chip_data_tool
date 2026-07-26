@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "name": "bit_mapping_example",
+  "sample_input": "8'hB2",
+  "input_defaults": {
+    "format_hint": "auto",
+    "width": 8,
+    "signed_mode": "自动"
+  },
+  "steps": [
+    {
+      "type": "mapping",
+      "output_width": 4,
+      "specification": "output[3] = input[0]\noutput[2] = ~input[1]\noutput[1] = input[7] ^ input[6]\noutput[0] = ^input[3:0]"
+    }
+  ]
+}

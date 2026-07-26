@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "32bit_byte_reverse",
+  "sample_input": "32'h1234_5678",
+  "input_defaults": {
+    "format_hint": "auto",
+    "width": 32,
+    "signed_mode": "自动"
+  },
+  "steps": [
+    {
+      "type": "reverse_units",
+      "unit_bits": 8
+    }
+  ]
+}

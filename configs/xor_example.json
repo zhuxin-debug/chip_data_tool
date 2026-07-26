@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "name": "xor_example",
+  "sample_input": "8'hA5",
+  "input_defaults": {
+    "format_hint": "auto",
+    "width": 8,
+    "signed_mode": "自动"
+  },
+  "steps": [
+    {
+      "type": "binary",
+      "operator": "XOR",
+      "operand": "8'hFF"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "name": "bit_logic_example",
+  "sample_input": "8'hA4",
+  "input_defaults": {
+    "format_hint": "auto",
+    "width": 8,
+    "signed_mode": "自动"
+  },
+  "steps": [
+    {
+      "type": "bit_logic",
+      "left_bit": 7,
+      "operator": "XOR",
+      "right_bit": 6,
+      "target_bit": 0
+    }
+  ]
+}

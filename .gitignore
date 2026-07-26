@@ -1,0 +1,32 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+pytest-cache-files-*/
+
+# User-created templates are local working data. Keep the bundled example only.
+configs/*.json
+!configs/32bit_byte_reverse.json
+!configs/bit_mapping_example.json
+!configs/xor_example.json
+!configs/bit_logic_example.json
+!configs/pairwise_xor_example.json
+# 环境变量和密钥
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# 测试覆盖率
+.coverage
+coverage.xml
+htmlcov/
+
+# Python构建产物
+build/
+dist/
+*.egg-info/
+
+# 编辑器配置
+.vscode/
+.idea/
