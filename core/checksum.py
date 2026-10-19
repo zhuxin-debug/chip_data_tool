@@ -54,12 +54,21 @@ def append_parity(vector: BitVector, mode: str = "even", position: str = "lsb") 
     return BitVector(value, vector.width + 1)
 
 
-def calculate_crc(vector: BitVector, preset: CRCPreset) -> BitVector:
-    """Calculate CRC over bytes ordered from the vector MSB to LSB."""
+def calculate_crc(vector: BitVector, preset: CRCPreset, byte_order: str = "big") -> BitVector:
+    """Calculate a CRC with explicit byte order (reflection is independent)."""
 
     if vector.width % 8:
         raise OperationError("CRC 输入位宽必须是 8 的整数倍")
-    data = vector.value.to_bytes(vector.width // 8, byteorder="big")
+    if byte_order not in {"big", "little"}:
+        raise OperationError("字节顺序必须为 big 或 little")
+    if type(preset.width) is not int or not 8 <= preset.width <= 64:
+        raise OperationError("CRC 位宽必须为 8～64 的整数")
+    for name, value in {"poly": preset.polynomial, "init": preset.initial, "xorout": preset.xor_output}.items():
+        if type(value) is not int or not 0 <= value < 1 << preset.width:
+            raise OperationError(f"CRC {name} 超出 {preset.width} bit 范围")
+    if not preset.polynomial:
+        raise OperationError("CRC 多项式不能为 0")
+    data = vector.value.to_bytes(vector.width // 8, byteorder=byte_order)
     width = preset.width
     mask = (1 << width) - 1
     crc = preset.initial & mask

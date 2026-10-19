@@ -1,24 +1,53 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from .bit_vector import BitVector
 from .errors import OperationError
 from .pipeline import run_pipeline
+from .parser import parse_value
+from .operations import INPUT_RANGE_RE, resolve_operand
+from .validation import validate_steps
 
 
 def _safe_identifier(name: str) -> str:
-    identifier = re.sub(r"\W+", "_", name.strip())
+    identifier = re.sub(r"[^a-zA-Z0-9_$]+", "_", name.strip()).strip("_")
     if not identifier:
         identifier = "transform_data"
-    if identifier[0].isdigit():
+    if identifier[0].isdigit() or identifier[0] == "$":
+        identifier = f"fn_{identifier}"
+    # Prefix keywords (including uncommon language revisions) by accepting only
+    # a conservative function-name convention, or checking the bundled list.
+    keywords = set((Path(__file__).with_name("sv_keywords.txt")).read_text(encoding="utf-8").split())
+    if identifier in keywords or identifier == "input_data" or re.fullmatch(r"step_\d+", identifier):
         identifier = f"fn_{identifier}"
     return identifier
 
 
 def _current_expression(expression: str, current_name: str) -> str:
     return re.sub(r"\b(?:input|current)(?=\[)", current_name, expression, flags=re.IGNORECASE)
+
+
+def _sv_term(term: str, current: str) -> str:
+    if INPUT_RANGE_RE.fullmatch(term):
+        return _current_expression(term, current)
+    if term in {"'0", "'1"}:
+        return term
+    return parse_value(term).vector.with_signed(False).to_sv_hex()
+
+
+def _sv_expression(rhs: str, current: str) -> str:
+    reduction = re.fullmatch(r"(\^|&|\||~\^)\s*(input\[\d+(?::\d+)?\])", rhs, re.I)
+    if reduction:
+        return reduction[1] + _current_expression(reduction[2], current)
+    if rhs.startswith("~"):
+        return "~" + _sv_term(rhs[1:].strip(), current)
+    tokens = rhs.split()
+    if len(tokens) == 3:
+        return f"{_sv_term(tokens[0], current)} {tokens[1]} {_sv_term(tokens[2], current)}"
+    return _sv_term(rhs, current)
 
 
 def _mapping_assignments(specification: str, target: str, current: str) -> list[str]:
@@ -29,7 +58,7 @@ def _mapping_assignments(specification: str, target: str, current: str) -> list[
             continue
         lhs, rhs = (part.strip() for part in line.split("=", 1))
         lhs = re.sub(r"^output", target, lhs, flags=re.IGNORECASE)
-        rhs = _current_expression(rhs, current)
+        rhs = _sv_expression(rhs, current)
         lines.append(f"  {lhs} = {rhs};")
     return lines
 
@@ -39,6 +68,7 @@ def generate_systemverilog(
     steps: list[dict[str, Any]],
     function_name: str = "transform_data",
 ) -> str:
+    steps = validate_steps(steps)
     result = run_pipeline(source, steps)
     name = _safe_identifier(function_name)
     declarations = [
@@ -56,9 +86,11 @@ def generate_systemverilog(
     current_width = source.width
     for index, (step, stage) in enumerate(zip(steps, result.stages), start=1):
         target = f"step_{index}"
-        statements.append(f"  // {stage.description}")
+        statements.append("  // " + stage.description.replace("\n", " ").replace("\r", " "))
         step_type = step.get("type")
-        if step_type == "reverse_bits":
+        if not step.get("enabled", True):
+            statements.append(f"  {target} = {current};")
+        elif step_type == "reverse_bits":
             statements.append(f"  {target} = {{<<{{{current}}}}};")
         elif step_type == "reverse_units":
             unit = int(step["unit_bits"])
@@ -84,7 +116,9 @@ def generate_systemverilog(
         elif step_type == "binary":
             operators = {"AND": "&", "OR": "|", "XOR": "^", "XNOR": "~^", "ADD": "+", "SUB": "-"}
             operator = operators[str(step["operator"]).upper()]
-            operand = _current_expression(str(step["operand"]), current)
+            raw_operand = str(step["operand"]).strip()
+            operand = (_current_expression(raw_operand, current) if INPUT_RANGE_RE.fullmatch(raw_operand)
+                       else resolve_operand(stage.input_vector, raw_operand).with_signed(False).to_sv_hex())
             statements.append(f"  {target} = {current} {operator} {operand};")
         elif step_type == "not":
             statements.append(f"  {target} = ~{current};")
@@ -150,6 +184,11 @@ def generate_systemverilog(
                 statements.append(f"  {target} = {{{parity}, {current}}};")
             else:
                 statements.append(f"  {target} = {{{current}, {parity}}};")
+        elif step_type == "resize":
+            if step["mode"] == "sign":
+                statements.append(f"  {target} = $signed({current});")
+            else:
+                statements.append(f"  {target} = {current};")
         else:
             raise OperationError(f"无法为操作 {step_type} 生成 SystemVerilog")
         current = target

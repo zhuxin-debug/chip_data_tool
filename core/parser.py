@@ -136,6 +136,8 @@ def parse_value(
             raise ParseError("SystemVerilog 数值格式错误") from exc
 
         declared_width = int(groups["width"]) if groups["width"] else None
+        if declared_width is not None and declared_width <= 0:
+            raise ParseError("声明位宽必须大于 0")
         if width is not None and declared_width is not None and width != declared_width:
             raise ParseError(f"输入声明为 {declared_width} bit，但界面指定为 {width} bit")
         literal_signed = bool(groups["signed"]) or value < 0

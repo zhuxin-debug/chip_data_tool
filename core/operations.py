@@ -156,6 +156,7 @@ def shift_bits(vector: BitVector, direction: str, count: int) -> BitVector:
     if count < 0:
         raise OperationError("移位数量不能为负数")
     normalized = direction.lower()
+    count = min(count, vector.width)
     if normalized == "left":
         result = (vector.value << count) & vector.mask
     elif normalized == "right":
@@ -238,3 +239,18 @@ def bit_logic_operation(
     value = vector.value & ~target_mask
     value |= result_bit << target_bit
     return BitVector(value & vector.mask, vector.width, vector.signed)
+
+
+def resize_bits(vector: BitVector, width: int, mode: str = "zero") -> BitVector:
+    if mode == "truncate":
+        if width > vector.width:
+            raise OperationError("截断后的位宽不能大于输入位宽")
+        value = vector.value & ((1 << width) - 1)
+    elif mode in {"zero", "sign"}:
+        if width < vector.width:
+            raise OperationError("扩展后的位宽不能小于输入位宽；缩窄请使用截断")
+        value = vector.twos_complement_value if mode == "sign" else vector.value
+        value &= (1 << width) - 1
+    else:
+        raise OperationError(f"未知位宽转换方式：{mode}")
+    return BitVector(value, width, vector.signed)

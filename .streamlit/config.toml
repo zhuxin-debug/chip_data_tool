@@ -1,0 +1,9 @@
+[theme]
+primaryColor = "#087f8c"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+address = "127.0.0.1"
+maxUploadSize = 10

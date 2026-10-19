@@ -5,7 +5,7 @@ from typing import Any
 
 from .bit_vector import BitVector
 from .checksum import append_parity
-from .errors import OperationError
+from .errors import DataToolError, OperationError
 from .mapping import MappingBit, MappingRow, apply_assignment_mapping
 from .operations import (
     bit_logic_operation,
@@ -19,7 +19,10 @@ from .operations import (
     reverse_unit_order,
     rotate_bits,
     shift_bits,
+    resize_bits,
+    resolve_operand,
 )
+from .validation import validate_steps
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +33,7 @@ class PipelineStage:
     output_vector: BitVector
     mapping_rows: tuple[MappingRow, ...] = ()
     mapping_bits: tuple[MappingBit, ...] = ()
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +45,9 @@ class PipelineResult:
 
 def describe_step(step: dict[str, Any]) -> str:
     step_type = step.get("type")
+    if step_type == "resize":
+        names = {"zero": "补零扩展", "sign": "符号扩展", "truncate": "保留低位截断"}
+        return f"{names.get(step.get('mode'), '位宽转换')}至 {step.get('width')} bit"
     if step_type == "reverse_bits":
         return "整体 bit 反向"
     if step_type == "reverse_units":
@@ -107,82 +114,105 @@ def _nonnegative_int(value: Any, name: str) -> int:
 
 
 def run_pipeline(source: BitVector, steps: list[dict[str, Any]]) -> PipelineResult:
+    steps = validate_steps(steps)
     current = source
     stages: list[PipelineStage] = []
     for index, step in enumerate(steps, start=1):
+        if not step.get("enabled", True):
+            stages.append(PipelineStage(index, f"已停用 · {describe_step(step)}", current, current))
+            continue
         step_type = step.get("type")
         before = current
         mapping_rows: tuple[MappingRow, ...] = ()
         mapping_bits: tuple[MappingBit, ...] = ()
-        if step_type == "reverse_bits":
-            current = reverse_all_bits(current)
-        elif step_type == "reverse_units":
-            current = reverse_unit_order(current, _positive_int(step.get("unit_bits"), "操作单位"))
-        elif step_type == "reverse_bits_in_units":
-            current = reverse_bits_in_units(current, _positive_int(step.get("unit_bits"), "操作单位"))
-        elif step_type == "extract":
-            try:
-                msb = int(step.get("msb"))
-                lsb = int(step.get("lsb"))
-            except (TypeError, ValueError) as exc:
-                raise OperationError("字段 MSB 和 LSB 必须是整数") from exc
-            current = extract_bits(current, msb, lsb)
-        elif step_type == "mapping":
-            output_width_raw = step.get("output_width")
-            output_width = _positive_int(output_width_raw, "输出位宽") if output_width_raw else None
-            mapping = apply_assignment_mapping(current, str(step.get("specification", "")), output_width)
-            current = mapping.vector
-            mapping_rows = mapping.rows
-            mapping_bits = mapping.bits
-        elif step_type == "binary":
-            current = binary_operation(
-                current,
-                str(step.get("operator", "")),
-                str(step.get("operand", "")),
-            )
-        elif step_type == "not":
-            current = invert_bits(current)
-        elif step_type == "shift":
-            current = shift_bits(
-                current,
-                str(step.get("direction", "")),
-                _nonnegative_int(step.get("count"), "移位数量"),
-            )
-        elif step_type == "rotate":
-            current = rotate_bits(
-                current,
-                str(step.get("direction", "")),
-                _nonnegative_int(step.get("count"), "循环移位数量"),
-            )
-        elif step_type == "bit_edit":
-            current = edit_bit(
-                current,
-                _nonnegative_int(step.get("bit_index"), "bit 编号"),
-                str(step.get("action", "")),
-            )
-        elif step_type == "bit_logic":
-            current = bit_logic_operation(
-                current,
-                _nonnegative_int(step.get("left_bit"), "左操作数 bit 编号"),
-                str(step.get("operator", "")),
-                _nonnegative_int(step.get("right_bit"), "右操作数 bit 编号"),
-                _nonnegative_int(step.get("target_bit"), "目标 bit 编号"),
-            )
-        elif step_type == "group_reduce":
-            current = group_reduce(
-                current,
-                str(step.get("operator", "")),
-                _positive_int(step.get("group_bits", 2), "每组位数"),
-                str(step.get("direction", "lsb")),
-            )
-        elif step_type == "append_parity":
-            current = append_parity(
-                current,
-                str(step.get("mode", "even")),
-                str(step.get("position", "lsb")),
-            )
-        else:
-            raise OperationError(f"第 {index} 步包含未知操作：{step_type}")
+        notes: list[str] = []
+        try:
+            if step_type == "reverse_bits":
+                current = reverse_all_bits(current)
+            elif step_type == "reverse_units":
+                current = reverse_unit_order(current, _positive_int(step.get("unit_bits"), "操作单位"))
+            elif step_type == "reverse_bits_in_units":
+                current = reverse_bits_in_units(current, _positive_int(step.get("unit_bits"), "操作单位"))
+            elif step_type == "extract":
+                try:
+                    msb = int(step.get("msb"))
+                    lsb = int(step.get("lsb"))
+                except (TypeError, ValueError) as exc:
+                    raise OperationError("字段 MSB 和 LSB 必须是整数") from exc
+                current = extract_bits(current, msb, lsb)
+            elif step_type == "mapping":
+                output_width_raw = step.get("output_width")
+                output_width = _positive_int(output_width_raw, "输出位宽") if output_width_raw else None
+                mapping = apply_assignment_mapping(current, str(step.get("specification", "")), output_width)
+                current = mapping.vector
+                mapping_rows = mapping.rows
+                mapping_bits = mapping.bits
+            elif step_type == "binary":
+                current = binary_operation(
+                    current,
+                    str(step.get("operator", "")),
+                    str(step.get("operand", "")),
+                )
+                rhs = resolve_operand(before, step["operand"]).value
+                if step["operator"] in {"ADD", "SUB"}:
+                    full = before.value + rhs if step["operator"] == "ADD" else before.value - rhs
+                    if full > before.mask:
+                        notes.append("发生进位：结果已按当前位宽截断")
+                    if full < 0:
+                        notes.append("发生借位：结果已按当前位宽回绕")
+                    rhs_signed = BitVector(rhs, before.width).twos_complement_value
+                    signed_full = before.twos_complement_value + (rhs_signed if step["operator"] == "ADD" else -rhs_signed)
+                    if not -(1 << (before.width - 1)) <= signed_full < (1 << (before.width - 1)):
+                        notes.append("按有符号补码解释时发生溢出")
+            elif step_type == "not":
+                current = invert_bits(current)
+            elif step_type == "shift":
+                current = shift_bits(
+                    current,
+                    str(step.get("direction", "")),
+                    _nonnegative_int(step.get("count"), "移位数量"),
+                )
+            elif step_type == "rotate":
+                current = rotate_bits(
+                    current,
+                    str(step.get("direction", "")),
+                    _nonnegative_int(step.get("count"), "循环移位数量"),
+                )
+            elif step_type == "bit_edit":
+                current = edit_bit(
+                    current,
+                    _nonnegative_int(step.get("bit_index"), "bit 编号"),
+                    str(step.get("action", "")),
+                )
+            elif step_type == "bit_logic":
+                current = bit_logic_operation(
+                    current,
+                    _nonnegative_int(step.get("left_bit"), "左操作数 bit 编号"),
+                    str(step.get("operator", "")),
+                    _nonnegative_int(step.get("right_bit"), "右操作数 bit 编号"),
+                    _nonnegative_int(step.get("target_bit"), "目标 bit 编号"),
+                )
+            elif step_type == "group_reduce":
+                current = group_reduce(
+                    current,
+                    str(step.get("operator", "")),
+                    _positive_int(step.get("group_bits", 2), "每组位数"),
+                    str(step.get("direction", "lsb")),
+                )
+            elif step_type == "append_parity":
+                current = append_parity(
+                    current,
+                    str(step.get("mode", "even")),
+                    str(step.get("position", "lsb")),
+                )
+            elif step_type == "resize":
+                current = resize_bits(current, step["width"], step["mode"])
+                if step["width"] < before.width:
+                    notes.append(f"已丢弃高 {before.width - step['width']} bit；保留低 {step['width']} bit")
+            else:
+                raise OperationError(f"第 {index} 步包含未知操作：{step_type}")
+        except (DataToolError, ValueError) as exc:
+            raise OperationError(f"第 {index} 步（{describe_step(step)}）：{exc}") from exc
         stages.append(
             PipelineStage(
                 index,
@@ -191,6 +221,7 @@ def run_pipeline(source: BitVector, steps: list[dict[str, Any]]) -> PipelineResu
                 current,
                 mapping_rows,
                 mapping_bits,
+                tuple(notes),
             )
         )
     return PipelineResult(source, current, tuple(stages))

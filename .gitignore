@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.local/
 pytest-cache-files-*/
 
 # User-created templates are local working data. Keep the bundled example only.
